@@ -68,12 +68,12 @@ set pins, 0b10 [0]
 
 Since the PIO runs these as fast as possible, the output frequency depends on the speed at which the PIO runs.
 That speed is determined by two things:
-- system clock frequency (aka `sys_clk`; 125MHz on the rp-pico, but may vary on other uCs)
+- system clock frequency (aka `sys_clk`; 125MHz on the rp-pico, but may vary on other boards)
 - the clock divider for the PIO, which can be set from anything between `1` and `2^16`.
 
 Since the program consists of 4 instructions which make up the full wave, the maximum attainable output frequency is `sys_clk / 4`.
 
-See the comments where the the `int` and `frac` variables are set within [`src/main.rs`](./src/main.rs) for examples on how to set the dividers.
+See the comments where the `int` and `frac` variables are set within [`src/main.rs`](./src/main.rs) for examples on how to set the dividers.
 
 By default things are set up to output a 1 MHz wave.
 
