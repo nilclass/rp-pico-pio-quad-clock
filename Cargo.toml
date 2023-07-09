@@ -13,7 +13,7 @@ defmt-rtt = "0.4"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 
 # We're using a Pico by default on this template
-rp-pico = "0.7"
+rp-pico = { path = "../../../src/rp-hal-boards/boards/rp-pico" }
 pio-proc = "0.2.2"
 pio = "0.2.1"
 

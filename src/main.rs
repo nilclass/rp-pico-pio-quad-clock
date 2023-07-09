@@ -7,7 +7,6 @@
 use bsp::entry;
 use defmt::*;
 use defmt_rtt as _;
-use embedded_hal::digital::v2::OutputPin;
 use panic_probe as _;
 
 // Provide an alias for our BSP so we can switch targets quickly.
@@ -16,24 +15,24 @@ use rp_pico as bsp;
 // use sparkfun_pro_micro_rp2040 as bsp;
 
 use bsp::hal::{
-    clocks::{init_clocks_and_plls, Clock},
+    self,
+    clocks::init_clocks_and_plls,
     pac,
     sio::Sio,
     watchdog::Watchdog,
+    pio::{PIOExt, PIOBuilder},
+    gpio::{Pin, FunctionPio0},
 };
 
 #[entry]
 fn main() -> ! {
     info!("Program start");
     let mut pac = pac::Peripherals::take().unwrap();
-    let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(pac.WATCHDOG);
     let sio = Sio::new(pac.SIO);
 
-    // External high-speed crystal on the pico board is 12Mhz
-    let external_xtal_freq_hz = 12_000_000u32;
-    let clocks = init_clocks_and_plls(
-        external_xtal_freq_hz,
+    let _clocks = init_clocks_and_plls(
+        bsp::XOSC_CRYSTAL_FREQ,
         pac.XOSC,
         pac.CLOCKS,
         pac.PLL_SYS,
@@ -44,8 +43,6 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
-
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
@@ -53,20 +50,56 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // This is the correct pin on the Raspberry Pico board. On other boards, even if they have an
-    // on-board LED, it might need to be changed.
-    // Notably, on the Pico W, the LED is not connected to any of the RP2040 GPIOs but to the cyw43 module instead. If you have
-    // a Pico W and want to toggle a LED with a simple GPIO output pin, you can connect an external
-    // LED to one of the GPIO pins, and reference that pin here.
-    let mut led_pin = pins.led.into_push_pull_output();
+    // Set dividers to determine output clock frequency.
+    //
+    //    f_out = (sys_clk / 4) / (int + frac/256)
+    //
+    // Example: 125 MHz / 4 / (31 + 64/256) = 1 MHz
+    //
 
+    let (int, frac) = (31, 64); // 1 MHz
+    //let (int, frac) = (15, 160); // 2 MHz
+    //let (int, frac) = (4, 119); // ~7 MHz
+    //let (int, frac) = (2, 59); // ~14 MHz
+    //let (int, frac) = (1, 0); // 31.25 MHz (maximum)
+    //let (int, frac) = (0, 0); // 476.84 Hz (minimum)
+
+    // Select two pins for the output.
+    // NOTE: these pins MUST have consecutive pin numbers, and the lower one MUST be pin1.
+    let pin1: Pin<_, FunctionPio0, _> = pins.gpio16.into_function();
+    let pin2: Pin<_, FunctionPio0, _> = pins.gpio17.into_function();
+    let pin_base = pin1.id().num;
+
+    let program = pio_proc::pio_asm!(
+        ".wrap_target",
+        "set pins, 0b00 [0]",
+        "set pins, 0b01 [0]",
+        "set pins, 0b11 [0]",
+        "set pins, 0b10 [0]",
+        ".wrap"
+    );
+
+    // Initialize and start PIO
+    let (mut pio, sm0, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
+
+    // Install the program
+    let installed = pio.install(&program.program).unwrap();
+
+    // Set up state machine
+    let (mut sm, _, _) = PIOBuilder::from_program(installed)
+        .set_pins(pin_base, 2)
+        .clock_divisor_fixed_point(int, frac)
+        .build(sm0);
+    // The GPIO pin needs to be configured as an output.
+    sm.set_pindirs([
+        (pin1.id().num, hal::pio::PinDir::Output),
+        (pin2.id().num, hal::pio::PinDir::Output)
+    ]);
+    sm.start();
+
+    // PIO runs in background, independently from CPU
     loop {
-        info!("on!");
-        led_pin.set_high().unwrap();
-        delay.delay_ms(500);
-        info!("off!");
-        led_pin.set_low().unwrap();
-        delay.delay_ms(500);
+        cortex_m::asm::wfi();
     }
 }
 
